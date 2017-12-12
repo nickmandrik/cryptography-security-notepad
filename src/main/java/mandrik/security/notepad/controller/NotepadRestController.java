@@ -1,26 +1,36 @@
 package mandrik.security.notepad.controller;
 
 
-import com.sun.deploy.util.ArrayUtil;
+
 import mandrik.security.notepad.controller.utils.RestUtils;
 import mandrik.security.notepad.controller.utils.ValuesConfiguration;
 import mandrik.security.notepad.service.crypto.FileCipher;
-import org.apache.commons.lang.ArrayUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.*;
 
+
+import javax.crypto.BadPaddingException;
+import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.NoSuchPaddingException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpSession;
 import java.io.IOException;
-import java.util.ArrayList;
+import java.security.*;
+import java.security.interfaces.RSAPublicKey;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Map;
 import java.util.Random;
+
+import static mandrik.security.notepad.controller.utils.RestUtils.RESULT_ERROR;
+import static mandrik.security.notepad.controller.utils.RestUtils.RESULT_SUCCESS;
+import static mandrik.security.notepad.controller.utils.RestUtils.mapOf;
 
 @RestController
 public class NotepadRestController {
@@ -34,40 +44,23 @@ public class NotepadRestController {
         this.valuesConfiguration = valuesConfiguration;
     }
 
-    @GetMapping("/generate/key")
-    public Map generateKey(HttpServletRequest request) {
-
-        /*int[] bytes = new int[valuesConfiguration.getSessionKeyLength()];
-
-        for(int i = 0; i < valuesConfiguration.getSessionKeyLength(); i+=4) {
-            bytes[i] = new Random().nextInt(16);
-        }
-
-        ArrayList<Byte> sessionKey = new ArrayList<>();
-        sessionKey.addAll(Arrays.asList(ArrayUtils.toObject(bytes)));
-
-        new Random().nextBytes(sessionKey);
-
-        StringBuilder sessionKeyStb = new StringBuilder();
-
-        for(int i = 0; i < valuesConfiguration.getSessionKeyLength(); i++) {
-            sessionKeyStb.append((char) sessionKey[i]);
-        }
-
-        String stringKey = sessionKeyStb.toString();
-
-        */
+    @RequestMapping(value = "/key/generate", produces = MediaType.APPLICATION_XML_VALUE, method = RequestMethod.GET)
+    public String generateKey(HttpServletRequest request) {
 
         byte[] sessionKey = new byte[valuesConfiguration.getSessionKeyLength()];
         new Random().nextBytes(sessionKey);
 
         HttpSession session = request.getSession();
-        session.setAttribute("sessionKey", sessionKey);
+        Byte[] key = new Byte[valuesConfiguration.getSessionKeyLength()];
+        int index = 0;
+        for(byte b: sessionKey)
+            key[index++] = b;
+        session.setAttribute("sessionKey", key);
 
 
         Map response = RestUtils.mapOf("sessionKey", sessionKey);
         LOGGER.info("Generated new session key: " + Arrays.toString(sessionKey));
-        return response;
+        return "success";
     }
 
     @PostMapping("/download")
@@ -95,20 +88,58 @@ public class NotepadRestController {
             e.printStackTrace();
         }
 
-        return RestUtils.RESULT_SUCCESS;
+        return RESULT_SUCCESS;
     }
 
 
     @PostMapping("/upload/public-rsa-key")
-    public Map uploadOpenRSAKey(@RequestBody Map<String, String> mapOpenRSAKey, HttpServletRequest request) {
+    public Map uploadOpenRSAKey(@RequestBody Map<String, String> openRSAKey, HttpServletRequest request) {
 
-        String openKey = mapOpenRSAKey.get("publicRSAKey");
+
+        if(!openRSAKey.containsKey("key")) {
+            return RESULT_ERROR;
+        }
+
+        String rsaKey = openRSAKey.get("key");
+        byte[] openKey = Base64.getDecoder().decode(rsaKey);
+
+        LOGGER.info(Arrays.toString(openKey));
+
+        Byte[] key = new Byte[valuesConfiguration.getSessionKeyLength()];
+        int index = 0;
+        for(byte b: openKey)
+            key[index++] = b;
+        HttpSession session = request.getSession();
+        session.setAttribute("publicRSAKey", key);
+
+        return RESULT_SUCCESS;
+    }
+
+
+    @GetMapping("/key/get")
+    public Map getSessionKeyEncryptRSA(HttpServletRequest request) {
 
         HttpSession session = request.getSession();
-        session.setAttribute("publicRSAKey", openKey);
+        Byte[] sessionKey = (Byte[]) session.getAttribute("sessionKey");
+        Byte[] publicRSAKey = (Byte[]) session.getAttribute("publicRSAKey");
 
 
+        byte[] encryptSessionKey = new byte[0];
+        try {
+            Cipher cipher = Cipher.getInstance("RSA");
+            byte[] rsaKey = new byte[publicRSAKey.length];
 
-        return RestUtils.RESULT_SUCCESS;
+            X509EncodedKeySpec spec = new X509EncodedKeySpec(rsaKey);
+            KeyFactory fact = KeyFactory.getInstance("RSA");
+
+            cipher.init(Cipher.ENCRYPT_MODE, fact.generatePublic(spec));
+
+            encryptSessionKey = cipher.doFinal();
+        } catch (NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeySpecException
+                | InvalidKeyException | IllegalBlockSizeException | BadPaddingException e) {
+            return RESULT_ERROR;
+        }
+
+        return mapOf("sessionKey", sessionKey);
     }
 }

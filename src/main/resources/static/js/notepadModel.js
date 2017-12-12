@@ -2,16 +2,16 @@ function NotepadModel() {
 
     var self = this;
 
-    var sizeKeyRSA = 1024;
+    var rsaLengthKey = 2048;
+
+    var rsaKey;
 
     // urls to request
-    const urlGenerateKey = "/generate/key";
+    const urlGenerateKey = "/key/generate";
     const urlDownloadFile = "/download";
     const urlSendOpenRSAKey = "/upload/public-rsa-key";
+    const urlGetSessionKey = "/key/get";
     const urlCheckPartsExist = "/check-parts-exists";
-
-    var privateRSAKey,
-        publicRSAKey;
 
     self.sendRequestGenerateKey = function () {
         $.ajax({
@@ -20,8 +20,7 @@ function NotepadModel() {
             contentType: false,
             processData: false,
             success: function (data) {
-                alert("Session key generated:\n" + data["sessionKey"]);
-                console.log("Key generated:" + data["sessionKey"]);
+                console.log("\nKey generated: " + data["result"] + '\n\n');
             },
             error: function (jqXHR, textStatus, errorThrown) {
                 alert(textStatus + ': ' + errorThrown);
@@ -50,29 +49,40 @@ function NotepadModel() {
     };
 
     self.generateRSAKeys = function () {
-        var dt = new Date();
-        var time = -(dt.getTime());
-        var pemPrivate;
-        var pemPublic;
-
-
+        var passPhrase = "Password";
+        var rsaKey = cryptico.generateRSAKey(passPhrase, rsaLengthKey);
+        var mattsPublicKeyString = cryptico.publicKeyString(rsaKey);
+        var key = JSON.stringify(rsaKey);
+        self.rsaKey = rsaKey;
+        localStorage.setItem("rsa_key", key);
+        console.log("\nPublic RSA key:\n" + mattsPublicKeyString + "\n\n");
     };
 
-
     self.sendOpenRSAKey = function () {
-        var data = {
-            publicRSAKey: publicRSAKey
-        };
+        getRSAKeyFromStorage().then(function (key) {
+            var data = {
+                key: cryptico.publicKeyString(self.rsaKey)
+            };
+            $.ajax({
+                data: JSON.stringify(data),
+                url: urlSendOpenRSAKey,
+                type: 'POST',
+                contentType: "application/json",
+                success: function (data) {
+                    console.log('\nResult of sending RSA public key: ' + data["result"] + '\n\n');
+                }
+            });
+
+        });
+    };
+
+    self.getSessionKeyEncryptRSA = function() {
         $.ajax({
-            data: JSON.stringify(data),
-            url: urlSendOpenRSAKey,
-            type: 'POST',
+            url: urlGetSessionKey,
+            type: 'GET',
             contentType: "application/json",
             success: function (data) {
-                console.log(data);
-            },
-            error: function (jqXHR, textStatus, errorThrown) {
-                alert(textStatus + ': ' + errorThrown);
+                console.log('\nResult of sending RSA public key: ' + data["result"] + '\n\n');
             }
         });
     }

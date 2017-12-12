@@ -1,53 +1,84 @@
-function arrayBufferToBase64(arrayBuffer) {
-    var byteArray = new Uint8Array(arrayBuffer);
-    var byteString = '';
-    for(var i=0; i < byteArray.byteLength; i++) {
-        byteString += String.fromCharCode(byteArray[i]);
+var isNew = false;
+
+var rsa_opts = {
+    name: "RSA-OAEP",
+    modulusLength: 1024,
+    publicExponent: new Uint8Array([1, 0, 1]),  // 24 bit representation of 65537
+    hash: {name: "SHA-1"}
+};
+
+function getRSAKeyFromStorage() {
+    var key = localStorage.getItem("rsa_key");
+    return Promise.resolve(JSON.parse(key));
+}
+
+function convertPublicKey(key) {
+    return crypto.subtle.importKey("jwk", key, rsa_opts, true, ["encrypt"])
+        .then(function (result) {
+            return result;
+        });
+}
+
+//Utility function
+function str2ab(str) {
+    var arrBuff = new ArrayBuffer(str.length);
+    var bytes = new Uint8Array(arrBuff);
+    for (var iii = 0; iii < str.length; iii++) {
+        bytes[iii] = str.charCodeAt(iii);
     }
-    return window.btoa(byteString);
+    return bytes;
 }
 
-function toPem(privateKey) {
-    return arrayBufferToBase64(privateKey);
+function ab2str(buf) {
+    return String.fromCharCode.apply(null, new Uint16Array(buf));
+}
+
+function getRSAKey() {
+    isNew = true;
+
+    return createAndSaveAKeyPair()
+        .then(function (data) {
+            return Promise.all([crypto.subtle.exportKey("jwk", data.privateKey), crypto.subtle.exportKey("jwk", data.publicKey)]);
+        })
+        .then(function (result) {
+            var key = JSON.stringify({public: result[1], private: result[0]});
+            localStorage.setItem("rsa_key", key);
+            return Promise.resolve(JSON.parse(key));
+        })
+        .catch(function (e) {
+            console.warn(e);
+        })
+}
+
+var keyPair;
+
+function createAndSaveAKeyPair() {
+    return window.crypto.subtle.generateKey(
+        rsa_opts,
+        true,   // can extract it later if we want
+        ["encrypt", "decrypt"])
+        .then(function (key) {
+            keyPair = key;
+            return key;
+        });
 }
 
 
-function generateRSA() {
-    window.crypto.subtle.generateKey(
-        {
-            name: "RSA-OAEP",
-            modulusLength: 2048,
-            publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
-            hash: {name: "SHA-256"}
-        },
-        true,
-        ["encrypt", "decrypt"] //can be any combination of "sign" and "verify"
-    ).then(function(keyPair){
-        window.crypto.subtle.exportKey(
-            "pkcs8",
-            keyPair.privateKey
-        ).then(function(exportedPrivateKey) {
-            pemPrivate = toPem(exportedPrivateKey);
-        }).catch(function(err) {
-            console.log("Error to generate Private key: " + err);
-        });
+function generateAndLogRsaKey() {
+    var dt = new Date();
+    var time = -(dt.getTime());
+    getRSAKey().then( function(key) {
+        time += (dt.getTime());
+        console.log("\nRSA key generated in " + time + "ms.\n\nRSA public key:\n" +
+            key.public["n"].length + "\n\nRSA private key:\n" + key.private["d"].length + "\n\n");
+    })
+}
 
-        window.crypto.subtle.exportKey(
-            "spki",
-            keyPair.publicKey
-        ).then(function(exportedPublicKey) {
-            pemPublic = toPem(exportedPublicKey);
-            console.log(pemPublic)
-        }).catch(function(err) {
-            console.log("Error to generate Public key: " + err);
-        });
-    }).then(function() {
-            dt = new Date();
-            time += (dt.getTime());
-            console.log("\nRSA key generated in " + time + "ms.\n\nRSA public key:\n" +
-                toPem(pemPublic) + "\n\nRSA private key:\n" + toPem(pemPrivate) + "\n\n");
-        }
-    ).catch(function(err){
-        console.error(err);
-    });
+function base64UrlDecode(str) {
+    str = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+    var buffer = new Uint8Array(str.length);
+    for(var i = 0; i < str.length; ++i) {
+        buffer[i] = str.charCodeAt(i);
+    }
+    return buffer;
 }
